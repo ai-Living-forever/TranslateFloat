@@ -13,7 +13,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.view.ActionMode
 import android.view.Gravity
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -41,7 +44,8 @@ class FloatWindowService : Service() {
     private var initialY = 0
     private var touchX = 0f
     private var touchY = 0f
-    private var isMoving = false
+    private var startX = 0f
+    private var startY = 0f
 
     private var currentOriginalText = ""
     private var currentTranslatedText = ""
@@ -51,6 +55,9 @@ class FloatWindowService : Service() {
         private const val CHANNEL_ID = "translate_float_channel"
         private const val NOTIFICATION_ID = 1
         var isRunning = false
+        
+        // 静态方法供 MainActivity 调用
+        var onTranslateListener: ((String) -> Unit)? = null
     }
 
     override fun onCreate() {
@@ -108,7 +115,7 @@ class FloatWindowService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("TranslateFloat")
-            .setContentText("点击展开设置")
+            .setContentText("悬浮窗服务运行中")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -144,7 +151,8 @@ class FloatWindowService : Service() {
             dpToPx(56),
             getWindowType(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -152,25 +160,26 @@ class FloatWindowService : Service() {
             y = resources.displayMetrics.heightPixels / 2 - dpToPx(28)
         }
 
-        // 触摸事件处理
+        // 使用 OnClickListener 处理点击
+        container.setOnClickListener {
+            onFloatBallClick()
+        }
+
+        // 同时保留触摸用于拖动
         container.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    startX = event.rawX
+                    startY = event.rawY
                     initialX = floatBallParams?.x ?: 0
                     initialY = floatBallParams?.y ?: 0
-                    touchX = event.rawX
-                    touchY = event.rawY
-                    isMoving = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val deltaX = (event.rawX - touchX).toInt()
-                    val deltaY = (event.rawY - touchY).toInt()
-                    // 如果移动超过 10px，标记为移动状态
+                    val deltaX = (event.rawX - startX).toInt()
+                    val deltaY = (event.rawY - startY).toInt()
+                    // 移动超过 10px 才认为是拖动
                     if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
-                        isMoving = true
-                    }
-                    if (isMoving) {
                         floatBallParams?.x = initialX + deltaX
                         floatBallParams?.y = initialY + deltaY
                         floatBallView?.let {
@@ -179,15 +188,7 @@ class FloatWindowService : Service() {
                     }
                     true
                 }
-                MotionEvent.ACTION_UP -> {
-                    // 如果没有移动，触发点击
-                    if (!isMoving) {
-                        onFloatBallClick()
-                    }
-                    isMoving = false
-                    true
-                }
-                else -> false
+                else -> true
             }
         }
 
@@ -212,8 +213,43 @@ class FloatWindowService : Service() {
     }
 
     private fun onFloatBallClick() {
+        showToast("正在翻译...")
         hideTranslationPanel()
         performTranslation()
+    }
+
+    // 公开方法供 MainActivity 调用
+    fun translateText(text: String) {
+        currentOriginalText = text
+        isPanelLoading = true
+        showTranslationPanel()
+        
+        // 同时更新剪贴板（因为 performTranslation 会读取剪贴板）
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = android.content.ClipData.newPlainText("translate", text)
+        clipboard.setPrimaryClip(clip)
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val translated = translateApi.translate(text, settingsManager.targetLang)
+                currentTranslatedText = translated
+                
+                settingsManager.addToHistory(text, translated)
+
+                withContext(Dispatchers.Main) {
+                    isPanelLoading = false
+                    updateTranslationPanel()
+                    showToast("翻译完成")
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    currentTranslatedText = "翻译失败: ${e.message}"
+                    isPanelLoading = false
+                    updateTranslationPanel()
+                    showToast("翻译失败: ${e.message}")
+                }
+            }
+        }
     }
 
     private fun performTranslation() {
@@ -227,7 +263,6 @@ class FloatWindowService : Service() {
 
         currentOriginalText = clipText
         isPanelLoading = true
-        showTranslationPanel()
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
