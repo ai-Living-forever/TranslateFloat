@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TranslateFloat</string>
+    <string name="channel_name">悬浮窗服务</string>
+    <string name="channel_description">保持悬浮窗翻译服务运行</string>
+</resources>
