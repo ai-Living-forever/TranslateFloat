@@ -226,6 +226,7 @@ class FloatWindowService : Service() {
             setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
         }
 
+        // 标题
         val titleBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         titleBar.addView(TextView(this).apply {
             text = "翻译结果"
@@ -241,19 +242,24 @@ class FloatWindowService : Service() {
         })
         panel.addView(titleBar)
 
+        // 原文标签
         panel.addView(TextView(this).apply {
             text = "原文"
             textSize = 12f
             setTextColor(0xFF6B7280.toInt())
             setPadding(0, dpToPx(12), 0, dpToPx(4))
         })
-        panel.addView(TextView(this).apply {
+        
+        // 原文内容
+        val originalTextView = TextView(this).apply {
             text = currentOriginalText
             textSize = 14f
             setTextColor(0xFF374151.toInt())
             maxLines = 3
-        })
+        }
+        panel.addView(originalTextView)
 
+        // 译文标签
         panel.addView(TextView(this).apply {
             text = "译文"
             textSize = 12f
@@ -261,14 +267,16 @@ class FloatWindowService : Service() {
             setPadding(0, dpToPx(12), 0, dpToPx(4))
         })
         
-        val transTextView = TextView(this).apply {
+        // 译文内容
+        val translatedTextView = TextView(this).apply {
             text = if (isPanelLoading) "翻译中..." else currentTranslatedText
             textSize = 14f
             setTextColor(0xFF000000.toInt())
             maxLines = 5
         }
-        panel.addView(transTextView)
+        panel.addView(translatedTextView)
 
+        // 保存按钮
         panel.addView(Button(this).apply {
             text = "保存到 Obsidian"
             setBackgroundColor(0xFF10B981.toInt())
@@ -285,14 +293,17 @@ class FloatWindowService : Service() {
             }
         })
 
+        // 创建 PopupWindow
         popupWindow = PopupWindow(panel, dpToPx(320), WindowManager.LayoutParams.WRAP_CONTENT, true).apply {
             setOutsideTouchable(true)
             setBackgroundDrawable(null)
-            floatBallView?.let { floatBall ->
-                val location = IntArray(2)
-                floatBall.getLocationOnScreen(location)
-                showAtLocation(floatBall, Gravity.NO_GRAVITY, location[0], location[1] + dpToPx(60))
-            }
+            elevation = 8f
+            
+            // 屏幕居中显示
+            val displayMetrics = resources.displayMetrics
+            val x = (displayMetrics.widthPixels - dpToPx(320)) / 2
+            val y = (displayMetrics.heightPixels - dpToPx(400)) / 2
+            showAtLocation(null, Gravity.NO_GRAVITY, x, y)
         }
         
         translationPanelView = panel
