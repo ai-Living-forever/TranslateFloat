@@ -20,11 +20,12 @@ class ObsidianHelper(private val context: Context) {
         
         val filePath = "$savePath/$dateFileName.md"
         
+        // 改进格式：原文和译文分开显示
         val content = buildString {
             append("## $time\n")
-            append("**原文**：$original\n")
-            append("**译文**：$translated\n")
-            append("---\n")
+            append("**原文**：\n$original\n\n")
+            append("**译文**：\n$translated\n")
+            append("---\n\n")
         }
 
         val encodedVault = URLEncoder.encode(vault, "UTF-8")
@@ -54,9 +55,9 @@ class ObsidianHelper(private val context: Context) {
         
         val content = buildString {
             append("## $time\n")
-            append("**原文**：${record.original}\n")
-            append("**译文**：${record.translated}\n")
-            append("---\n")
+            append("**原文**：\n${record.original}\n\n")
+            append("**译文**：\n${record.translated}\n")
+            append("---\n\n")
         }
 
         val encodedVault = URLEncoder.encode(vault, "UTF-8")

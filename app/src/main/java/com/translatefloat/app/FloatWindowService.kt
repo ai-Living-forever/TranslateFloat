@@ -34,6 +34,7 @@ class FloatWindowService : Service() {
 
     private var floatBallView: View? = null
     private var translationPanelView: View? = null
+    private var backgroundView: View? = null  // 点击外部关闭的背景
     private var floatBallParams: WindowManager.LayoutParams? = null
     private var panelParams: WindowManager.LayoutParams? = null
 
@@ -241,6 +242,28 @@ class FloatWindowService : Service() {
     private fun showTranslationPanel() {
         if (translationPanelView != null) return
 
+        // 先创建一个半透明背景，点击可关闭
+        val backgroundParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            getWindowType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        
+        val backgroundView = View(this).apply {
+            setBackgroundColor(0x00000000) // 完全透明
+            setOnClickListener {
+                hideTranslationPanel()
+            }
+        }
+        
+        try {
+            windowManager.addView(backgroundView, backgroundParams)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
@@ -333,6 +356,11 @@ class FloatWindowService : Service() {
     }
 
     private fun hideTranslationPanel() {
+        // 移除背景
+        backgroundView?.let {
+            try { windowManager.removeView(it) } catch (e: Exception) { }
+            backgroundView = null
+        }
         translationPanelView?.let {
             try { windowManager.removeView(it) } catch (e: Exception) { }
             translationPanelView = null
