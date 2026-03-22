@@ -1,0 +1,18 @@
+[
+    {
+        "merged": "C:\\Users\\admin\\.gradle\\daemon\\8.2\\com.translatefloat.app-merged_res-55:\\drawable_ic_launcher_background.xml.flat",
+        "source": "C:\\Users\\admin\\.gradle\\daemon\\8.2\\com.translatefloat.app-main-57:\\drawable\\ic_launcher_background.xml"
+    },
+    {
+        "merged": "com.translatefloat.app-merged_res-55:/xml_accessibility_service_config.xml.flat",
+        "source": "com.translatefloat.app-main-57:/xml/accessibility_service_config.xml"
+    },
+    {
+        "merged": "C:\\Users\\admin\\.gradle\\daemon\\8.2\\com.translatefloat.app-merged_res-55:\\drawable_ic_launcher_foreground.xml.flat",
+        "source": "C:\\Users\\admin\\.gradle\\daemon\\8.2\\com.translatefloat.app-main-57:\\drawable\\ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "C:\\Users\\admin\\.gradle\\daemon\\8.2\\com.translatefloat.app-merged_res-55:\\xml_accessibility_service_config.xml.flat",
+        "source": "C:\\Users\\admin\\.gradle\\daemon\\8.2\\com.translatefloat.app-main-57:\\xml\\accessibility_service_config.xml"
+    }
+]

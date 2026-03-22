@@ -223,6 +223,9 @@ fun HomeScreen(
                     val text = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
                     if (!text.isNullOrBlank()) {
                         originalText = text
+                        // 保存到静态变量，供悬浮球使用
+                        FloatWindowService.lastSelectedText = text
+                        FloatWindowService.lastTranslatedText = text
                         // 调用翻译
                         CoroutineScope(Dispatchers.Main).launch {
                             try {

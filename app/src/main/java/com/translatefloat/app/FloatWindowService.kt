@@ -53,6 +53,8 @@ class FloatWindowService : Service() {
         var isRunning = false
         var lastClipboardText: String = ""
         var lastSelectedText: String = ""
+        // 新增：保存最后一次成功翻译的原文
+        var lastTranslatedText: String = ""
     }
 
     override fun onCreate() {
@@ -178,7 +180,6 @@ class FloatWindowService : Service() {
         if (lastSelectedText.isNotBlank()) {
             textToTranslate = lastSelectedText
             android.util.Log.d("FloatWindow", "使用选中的文字: $textToTranslate")
-            lastSelectedText = ""
         }
         
         // 2. 尝试读取剪贴板
@@ -198,6 +199,12 @@ class FloatWindowService : Service() {
             android.util.Log.d("FloatWindow", "使用备用内容: $textToTranslate")
         }
         
+        // 4. 使用最后一次翻译的原文
+        if (textToTranslate.isNullOrBlank() && lastTranslatedText.isNotBlank()) {
+            textToTranslate = lastTranslatedText
+            android.util.Log.d("FloatWindow", "使用上次翻译的原文: $textToTranslate")
+        }
+        
         if (textToTranslate.isNullOrBlank()) {
             showToast("请先复制或选中要翻译的文字")
             return
@@ -215,6 +222,12 @@ class FloatWindowService : Service() {
                 android.util.Log.d("FloatWindow", "翻译结果: $translated")
                 currentTranslatedText = translated
                 settingsManager.addToHistory(textToTranslate, translated)
+                
+                // 保存翻译原文供下次使用
+                lastTranslatedText = textToTranslate
+                // 清除选中文字
+                lastSelectedText = ""
+                
                 Handler(Looper.getMainLooper()).post {
                     isPanelLoading = false
                     updatePanelContent()

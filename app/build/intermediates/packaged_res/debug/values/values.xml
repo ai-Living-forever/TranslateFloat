@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="gray_100">#FFF3F4F6</color>
+    <color name="gray_300">#FFD1D5DB</color>
+    <color name="gray_500">#FF6B7280</color>
+    <color name="gray_700">#FF374151</color>
+    <color name="gray_900">#FF111827</color>
+    <color name="purple_500">#FF6366F1</color>
+    <color name="purple_700">#FF4F46E5</color>
+    <color name="white">#FFFFFFFF</color>
+    <string name="accessibility_service_description">TranslateFloat 需要此权限来检测您选中的文字并提供翻译服务。启用后，当您选中文字时，应用可以自动读取并翻译。</string>
+    <string name="app_name">TranslateFloat</string>
+    <string name="channel_description">保持悬浮窗翻译服务运行</string>
+    <string name="channel_name">悬浮窗服务</string>
+    <style name="Theme.TranslateFloat" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/purple_500</item>
+    </style>
+</resources>
