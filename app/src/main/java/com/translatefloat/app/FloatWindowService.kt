@@ -1,5 +1,6 @@
 package com.translatefloat.app
 
+import android.accessibilityservice.AccessibilityService
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -20,7 +21,6 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -33,8 +33,10 @@ class FloatWindowService : Service() {
 
     private var floatBallView: View? = null
     private var translationPanelView: View? = null
-    private var popupWindow: PopupWindow? = null
+    private var backgroundView: View? = null
     private var floatBallParams: WindowManager.LayoutParams? = null
+    private var panelParams: WindowManager.LayoutParams? = null
+    private var bgParams: WindowManager.LayoutParams? = null
 
     private var startX = 0f
     private var startY = 0f
@@ -95,7 +97,7 @@ class FloatWindowService : Service() {
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("TranslateFloat")
-            .setContentText("悬浮窗已启动，点击可打开主界面")
+            .setContentText("悬浮窗已启动")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -172,20 +174,28 @@ class FloatWindowService : Service() {
     private fun onFloatBallClick() {
         var textToTranslate: String? = null
         
+        // 1. 优先使用用户选中的文字
         if (lastSelectedText.isNotBlank()) {
             textToTranslate = lastSelectedText
+            android.util.Log.d("FloatWindow", "使用选中的文字: $textToTranslate")
             lastSelectedText = ""
         }
         
+        // 2. 尝试读取剪贴板
         if (textToTranslate.isNullOrBlank()) {
             try {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 textToTranslate = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-            } catch (e: Exception) { }
+                android.util.Log.d("FloatWindow", "剪贴板内容: $textToTranslate")
+            } catch (e: Exception) {
+                android.util.Log.e("FloatWindow", "剪贴板读取失败: ${e.message}")
+            }
         }
         
+        // 3. 使用主界面保存的内容
         if (textToTranslate.isNullOrBlank() && lastClipboardText.isNotBlank()) {
             textToTranslate = lastClipboardText
+            android.util.Log.d("FloatWindow", "使用备用内容: $textToTranslate")
         }
         
         if (textToTranslate.isNullOrBlank()) {
@@ -197,29 +207,75 @@ class FloatWindowService : Service() {
         isPanelLoading = true
         showTranslationPanel()
         
+        // 执行翻译
         Thread {
             try {
+                android.util.Log.d("FloatWindow", "开始翻译: $textToTranslate")
                 val translated = translateApi.translate(textToTranslate, settingsManager.targetLang)
+                android.util.Log.d("FloatWindow", "翻译结果: $translated")
                 currentTranslatedText = translated
                 settingsManager.addToHistory(textToTranslate, translated)
                 Handler(Looper.getMainLooper()).post {
                     isPanelLoading = false
-                    updateTranslationPanel()
+                    updatePanelContent()
                     showToast("翻译完成")
                 }
             } catch (e: Exception) {
+                android.util.Log.e("FloatWindow", "翻译失败: ${e.message}")
                 Handler(Looper.getMainLooper()).post {
                     currentTranslatedText = "翻译失败: ${e.message}"
                     isPanelLoading = false
-                    updateTranslationPanel()
+                    updatePanelContent()
                 }
             }
         }.start()
     }
 
     private fun showTranslationPanel() {
-        if (popupWindow?.isShowing == true) return
+        // 如果已有面板，先移除
+        if (translationPanelView != null) {
+            hideTranslationPanel()
+        }
         
+        // 创建半透明背景层
+        bgParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            getWindowType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        )
+        
+        backgroundView = View(this).apply {
+            setBackgroundColor(0x00000000)
+            setOnClickListener {
+                hideTranslationPanel()
+            }
+        }
+        
+        try {
+            windowManager.addView(backgroundView, bgParams)
+        } catch (e: Exception) {
+            android.util.Log.e("FloatWindow", "添加背景失败: ${e.message}")
+        }
+
+        val panel = createPanelView()
+
+        panelParams = WindowManager.LayoutParams(
+            dpToPx(320), WindowManager.LayoutParams.WRAP_CONTENT,
+            getWindowType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.CENTER }
+
+        translationPanelView = panel
+        try {
+            windowManager.addView(translationPanelView, panelParams)
+        } catch (e: Exception) {
+            android.util.Log.e("FloatWindow", "添加面板失败: ${e.message}")
+        }
+    }
+    
+    private fun createPanelView(): View {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
@@ -242,7 +298,7 @@ class FloatWindowService : Service() {
         })
         panel.addView(titleBar)
 
-        // 原文标签
+        // 原文
         panel.addView(TextView(this).apply {
             text = "原文"
             textSize = 12f
@@ -250,7 +306,6 @@ class FloatWindowService : Service() {
             setPadding(0, dpToPx(12), 0, dpToPx(4))
         })
         
-        // 原文内容
         val originalTextView = TextView(this).apply {
             text = currentOriginalText
             textSize = 14f
@@ -259,7 +314,7 @@ class FloatWindowService : Service() {
         }
         panel.addView(originalTextView)
 
-        // 译文标签
+        // 译文
         panel.addView(TextView(this).apply {
             text = "译文"
             textSize = 12f
@@ -267,7 +322,6 @@ class FloatWindowService : Service() {
             setPadding(0, dpToPx(12), 0, dpToPx(4))
         })
         
-        // 译文内容
         val translatedTextView = TextView(this).apply {
             text = if (isPanelLoading) "翻译中..." else currentTranslatedText
             textSize = 14f
@@ -292,32 +346,34 @@ class FloatWindowService : Service() {
                 }
             }
         })
-
-        // 创建 PopupWindow
-        popupWindow = PopupWindow(panel, dpToPx(320), WindowManager.LayoutParams.WRAP_CONTENT, true).apply {
-            setOutsideTouchable(true)
-            setBackgroundDrawable(null)
-            elevation = 8f
-            
-            // 屏幕居中显示
-            val displayMetrics = resources.displayMetrics
-            val x = (displayMetrics.widthPixels - dpToPx(320)) / 2
-            val y = (displayMetrics.heightPixels - dpToPx(400)) / 2
-            showAtLocation(null, Gravity.NO_GRAVITY, x, y)
+        
+        return panel
+    }
+    
+    private fun updatePanelContent() {
+        // 移除旧面板，创建新面板
+        translationPanelView?.let {
+            try { windowManager.removeView(it) } catch (e: Exception) { }
         }
         
-        translationPanelView = panel
-    }
-
-    private fun updateTranslationPanel() {
-        hideTranslationPanel()
-        showTranslationPanel()
+        translationPanelView = createPanelView()
+        
+        try {
+            windowManager.addView(translationPanelView, panelParams)
+        } catch (e: Exception) {
+            android.util.Log.e("FloatWindow", "更新面板失败: ${e.message}")
+        }
     }
 
     private fun hideTranslationPanel() {
-        popupWindow?.dismiss()
-        popupWindow = null
-        translationPanelView = null
+        backgroundView?.let {
+            try { windowManager.removeView(it) } catch (e: Exception) { }
+            backgroundView = null
+        }
+        translationPanelView?.let {
+            try { windowManager.removeView(it) } catch (e: Exception) { }
+            translationPanelView = null
+        }
         currentOriginalText = ""
         currentTranslatedText = ""
     }
