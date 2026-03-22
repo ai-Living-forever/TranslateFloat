@@ -1,5 +1,7 @@
 package com.translatefloat.app
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -61,6 +63,10 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -183,6 +189,8 @@ fun HomeScreen(
     var isServiceRunning by remember {
         mutableStateOf(FloatWindowService.isRunning)
     }
+    var translationResult by remember { mutableStateOf<String?>(null) }
+    var originalText by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -205,7 +213,76 @@ fun HomeScreen(
             color = Color.Gray
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 翻译剪贴板按钮
+        Button(
+            onClick = {
+                try {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val text = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+                    if (!text.isNullOrBlank()) {
+                        originalText = text
+                        // 调用翻译
+                        CoroutineScope(Dispatchers.Main).launch {
+                            try {
+                                val api = TranslateApi()
+                                val result = withContext(Dispatchers.IO) {
+                                    api.translate(text, settingsManager.targetLang)
+                                }
+                                translationResult = result
+                                settingsManager.addToHistory(text, result)
+                            } catch (e: Exception) {
+                                translationResult = "翻译失败: ${e.message}"
+                            }
+                        }
+                    } else {
+                        translationResult = "请先复制文字"
+                    }
+                } catch (e: Exception) {
+                    translationResult = "读取剪贴板失败: ${e.message}"
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+        ) {
+            Text("📋 翻译剪贴板内容")
+        }
+
+        // 显示翻译结果
+        if (translationResult != null) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("原文:", fontSize = 12.sp, color = Color.Gray)
+                    Text(originalText, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("译文:", fontSize = 12.sp, color = Color.Gray)
+                    Text(translationResult!!, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            try {
+                                val helper = ObsidianHelper(context)
+                                helper.saveToObsidian(originalText, translationResult!!)
+                                translationResult = null
+                            } catch (e: Exception) {
+                                translationResult = "保存失败: ${e.message}"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                    ) {
+                        Text("💾 保存到 Obsidian")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Permission Card
         Card(
