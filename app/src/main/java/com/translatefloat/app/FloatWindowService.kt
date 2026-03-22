@@ -18,8 +18,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -43,6 +41,7 @@ class FloatWindowService : Service() {
     private var initialY = 0
     private var touchX = 0f
     private var touchY = 0f
+    private var isMoving = false
 
     private var currentOriginalText = ""
     private var currentTranslatedText = ""
@@ -120,32 +119,32 @@ class FloatWindowService : Service() {
     private fun showFloatBall() {
         if (floatBallView != null) return
 
-        // 创建悬浮球 - 简单的 ImageView
-        val ball = ImageView(this).apply {
+        // 创建悬浮球容器
+        val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(dpToPx(56), dpToPx(56))
             setBackgroundColor(0xFF6366F1.toInt())
         }
 
+        // 添加文字
         val textView = TextView(this).apply {
             text = "译"
             textSize = 20f
             setTextColor(0xFFFFFFFF.toInt())
             gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
         }
-
-        val container = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(dpToPx(56), dpToPx(56))
-        }
-        container.addView(ball)
         container.addView(textView)
 
+        // 设置 LayoutParams
         floatBallParams = WindowManager.LayoutParams(
             dpToPx(56),
             dpToPx(56),
             getWindowType(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -153,6 +152,7 @@ class FloatWindowService : Service() {
             y = resources.displayMetrics.heightPixels / 2 - dpToPx(28)
         }
 
+        // 触摸事件处理
         container.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
@@ -160,24 +160,31 @@ class FloatWindowService : Service() {
                     initialY = floatBallParams?.y ?: 0
                     touchX = event.rawX
                     touchY = event.rawY
+                    isMoving = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val deltaX = (event.rawX - touchX).toInt()
                     val deltaY = (event.rawY - touchY).toInt()
-                    floatBallParams?.x = initialX + deltaX
-                    floatBallParams?.y = initialY + deltaY
-                    floatBallView?.let {
-                        windowManager.updateViewLayout(it, floatBallParams)
+                    // 如果移动超过 10px，标记为移动状态
+                    if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+                        isMoving = true
+                    }
+                    if (isMoving) {
+                        floatBallParams?.x = initialX + deltaX
+                        floatBallParams?.y = initialY + deltaY
+                        floatBallView?.let {
+                            windowManager.updateViewLayout(it, floatBallParams)
+                        }
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    val deltaX = Math.abs(event.rawX - touchX)
-                    val deltaY = Math.abs(event.rawY - touchY)
-                    if (deltaX < 20 && deltaY < 20) {
+                    // 如果没有移动，触发点击
+                    if (!isMoving) {
                         onFloatBallClick()
                     }
+                    isMoving = false
                     true
                 }
                 else -> false
@@ -246,23 +253,23 @@ class FloatWindowService : Service() {
     private fun showTranslationPanel() {
         if (translationPanelView != null) return
 
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val panel = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
             setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
         }
 
         // 标题
-        val titleBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val titleBar = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
         }
-        val title = TextView(this).apply {
+        val title = android.widget.TextView(this).apply {
             text = "翻译结果"
             textSize = 18f
             setTextColor(0xFF111827.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val closeBtn = TextView(this).apply {
+        val closeBtn = android.widget.TextView(this).apply {
             text = "✕"
             textSize = 18f
             setTextColor(0xFF9CA3AF.toInt())
@@ -273,7 +280,7 @@ class FloatWindowService : Service() {
         panel.addView(titleBar)
 
         // 原文
-        val origLabel = TextView(this).apply {
+        val origLabel = android.widget.TextView(this).apply {
             text = "原文"
             textSize = 12f
             setTextColor(0xFF6B7280.toInt())
@@ -281,7 +288,7 @@ class FloatWindowService : Service() {
         }
         panel.addView(origLabel)
 
-        val origText = TextView(this).apply {
+        val origText = android.widget.TextView(this).apply {
             text = currentOriginalText
             textSize = 14f
             setTextColor(0xFF374151.toInt())
@@ -290,7 +297,7 @@ class FloatWindowService : Service() {
         panel.addView(origText)
 
         // 译文
-        val transLabel = TextView(this).apply {
+        val transLabel = android.widget.TextView(this).apply {
             text = "译文"
             textSize = 12f
             setTextColor(0xFF6B7280.toInt())
@@ -298,7 +305,7 @@ class FloatWindowService : Service() {
         }
         panel.addView(transLabel)
 
-        val transText = TextView(this).apply {
+        val transText = android.widget.TextView(this).apply {
             text = if (isPanelLoading) "翻译中..." else currentTranslatedText
             textSize = 14f
             setTextColor(0xFF000000.toInt())
@@ -311,8 +318,8 @@ class FloatWindowService : Service() {
             text = "保存到 Obsidian"
             setBackgroundColor(0xFF6366F1.toInt())
             setTextColor(0xFFFFFFFF.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
                 dpToPx(44)
             ).apply { topMargin = dpToPx(16) }
             setOnClickListener { saveToObsidian() }
