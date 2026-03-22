@@ -34,6 +34,7 @@ class FloatWindowService : Service() {
 
     private var floatBallView: View? = null
     private var translationPanelView: View? = null
+    private var backgroundView: View? = null
     private var floatBallParams: WindowManager.LayoutParams? = null
     private var panelParams: WindowManager.LayoutParams? = null
 
@@ -241,6 +242,29 @@ class FloatWindowService : Service() {
     private fun showTranslationPanel() {
         if (translationPanelView != null) return
 
+        // 创建半透明背景，点击可关闭
+        val bgParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            getWindowType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSPARENT
+        )
+        
+        backgroundView = View(this).apply {
+            setOnClickListener {
+                hideTranslationPanel()
+            }
+        }
+        
+        try {
+            windowManager.addView(backgroundView, bgParams)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
@@ -312,7 +336,8 @@ class FloatWindowService : Service() {
 
         panelParams = WindowManager.LayoutParams(
             dpToPx(320), WindowManager.LayoutParams.WRAP_CONTENT,
-            getWindowType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            getWindowType(), 
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.CENTER }
 
@@ -333,6 +358,10 @@ class FloatWindowService : Service() {
     }
 
     private fun hideTranslationPanel() {
+        backgroundView?.let {
+            try { windowManager.removeView(it) } catch (e: Exception) { }
+            backgroundView = null
+        }
         translationPanelView?.let {
             try { windowManager.removeView(it) } catch (e: Exception) { }
             translationPanelView = null
