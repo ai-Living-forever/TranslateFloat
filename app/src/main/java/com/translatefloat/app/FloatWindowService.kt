@@ -13,10 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.view.ActionMode
 import android.view.Gravity
-import android.view.Menu
-import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -42,10 +39,9 @@ class FloatWindowService : Service() {
 
     private var initialX = 0
     private var initialY = 0
-    private var touchX = 0f
-    private var touchY = 0f
     private var startX = 0f
     private var startY = 0f
+    private var lastTouchTime = 0L
 
     private var currentOriginalText = ""
     private var currentTranslatedText = ""
@@ -55,9 +51,6 @@ class FloatWindowService : Service() {
         private const val CHANNEL_ID = "translate_float_channel"
         private const val NOTIFICATION_ID = 1
         var isRunning = false
-        
-        // 静态方法供 MainActivity 调用
-        var onTranslateListener: ((String) -> Unit)? = null
     }
 
     override fun onCreate() {
@@ -67,9 +60,11 @@ class FloatWindowService : Service() {
         translateApi = TranslateApi()
         obsidianHelper = ObsidianHelper(this)
         createNotificationChannel()
+        android.util.Log.d("FloatWindow", "Service onCreate")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        android.util.Log.d("FloatWindow", "Service onStartCommand")
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
         
@@ -88,6 +83,7 @@ class FloatWindowService : Service() {
         super.onDestroy()
         isRunning = false
         removeFloatWindow()
+        android.util.Log.d("FloatWindow", "Service onDestroy")
     }
 
     private fun createNotificationChannel() {
@@ -124,12 +120,19 @@ class FloatWindowService : Service() {
     }
 
     private fun showFloatBall() {
-        if (floatBallView != null) return
+        if (floatBallView != null) {
+            android.util.Log.d("FloatWindow", "Float ball already exists")
+            return
+        }
+
+        android.util.Log.d("FloatWindow", "Creating float ball")
 
         // 创建悬浮球容器
         val container = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(dpToPx(56), dpToPx(56))
             setBackgroundColor(0xFF6366F1.toInt())
+            isClickable = true
+            isFocusable = true
         }
 
         // 添加文字
@@ -160,31 +163,38 @@ class FloatWindowService : Service() {
             y = resources.displayMetrics.heightPixels / 2 - dpToPx(28)
         }
 
-        // 使用 OnClickListener 处理点击
-        container.setOnClickListener {
-            onFloatBallClick()
-        }
-
-        // 同时保留触摸用于拖动
+        // 只用 OnTouchListener 处理点击和拖动
         container.setOnTouchListener { v, event ->
+            android.util.Log.d("FloatWindow", "Touch event: ${event.action}")
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     startX = event.rawX
                     startY = event.rawY
                     initialX = floatBallParams?.x ?: 0
                     initialY = floatBallParams?.y ?: 0
+                    lastTouchTime = System.currentTimeMillis()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val deltaX = (event.rawX - startX).toInt()
                     val deltaY = (event.rawY - startY).toInt()
-                    // 移动超过 10px 才认为是拖动
-                    if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+                    // 移动超过 15px 才认为是拖动
+                    if (Math.abs(deltaX) > 15 || Math.abs(deltaY) > 15) {
                         floatBallParams?.x = initialX + deltaX
                         floatBallParams?.y = initialY + deltaY
                         floatBallView?.let {
                             windowManager.updateViewLayout(it, floatBallParams)
                         }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val deltaX = Math.abs(event.rawX - startX)
+                    val deltaY = Math.abs(event.rawY - startY)
+                    // 移动距离小于 15px 认为是点击
+                    if (deltaX < 15 && deltaY < 15) {
+                        android.util.Log.d("FloatWindow", "Click detected, calling onFloatBallClick")
+                        onFloatBallClick()
                     }
                     true
                 }
@@ -196,8 +206,10 @@ class FloatWindowService : Service() {
 
         try {
             windowManager.addView(floatBallView, floatBallParams)
+            android.util.Log.d("FloatWindow", "Float ball added successfully")
             showToast("悬浮球已显示")
         } catch (e: Exception) {
+            android.util.Log.e("FloatWindow", "Failed to add float ball: ${e.message}")
             e.printStackTrace()
             showToast("悬浮球创建失败: ${e.message}")
         }
@@ -213,46 +225,15 @@ class FloatWindowService : Service() {
     }
 
     private fun onFloatBallClick() {
+        android.util.Log.d("FloatWindow", "onFloatBallClick called")
         showToast("正在翻译...")
         hideTranslationPanel()
         performTranslation()
     }
 
-    // 公开方法供 MainActivity 调用
-    fun translateText(text: String) {
-        currentOriginalText = text
-        isPanelLoading = true
-        showTranslationPanel()
-        
-        // 同时更新剪贴板（因为 performTranslation 会读取剪贴板）
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = android.content.ClipData.newPlainText("translate", text)
-        clipboard.setPrimaryClip(clip)
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val translated = translateApi.translate(text, settingsManager.targetLang)
-                currentTranslatedText = translated
-                
-                settingsManager.addToHistory(text, translated)
-
-                withContext(Dispatchers.Main) {
-                    isPanelLoading = false
-                    updateTranslationPanel()
-                    showToast("翻译完成")
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    currentTranslatedText = "翻译失败: ${e.message}"
-                    isPanelLoading = false
-                    updateTranslationPanel()
-                    showToast("翻译失败: ${e.message}")
-                }
-            }
-        }
-    }
-
     private fun performTranslation() {
+        android.util.Log.d("FloatWindow", "performTranslation called")
+        
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
 
@@ -263,10 +244,13 @@ class FloatWindowService : Service() {
 
         currentOriginalText = clipText
         isPanelLoading = true
+        showTranslationPanel()
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                android.util.Log.d("FloatWindow", "Starting translation for: $clipText")
                 val translated = translateApi.translate(clipText, settingsManager.targetLang)
+                android.util.Log.d("FloatWindow", "Translation result: $translated")
                 currentTranslatedText = translated
                 
                 settingsManager.addToHistory(clipText, translated)
@@ -276,6 +260,7 @@ class FloatWindowService : Service() {
                     updateTranslationPanel()
                 }
             } catch (e: Exception) {
+                android.util.Log.e("FloatWindow", "Translation failed: ${e.message}")
                 withContext(Dispatchers.Main) {
                     currentTranslatedText = "翻译失败: ${e.message}"
                     isPanelLoading = false
@@ -286,6 +271,7 @@ class FloatWindowService : Service() {
     }
 
     private fun showTranslationPanel() {
+        android.util.Log.d("FloatWindow", "showTranslationPanel called")
         if (translationPanelView != null) return
 
         val panel = android.widget.LinearLayout(this).apply {
@@ -375,7 +361,9 @@ class FloatWindowService : Service() {
 
         try {
             windowManager.addView(translationPanelView, panelParams)
+            android.util.Log.d("FloatWindow", "Translation panel added")
         } catch (e: Exception) {
+            android.util.Log.e("FloatWindow", "Failed to add panel: ${e.message}")
             e.printStackTrace()
         }
     }
@@ -426,6 +414,7 @@ class FloatWindowService : Service() {
     }
 
     private fun showToast(message: String) {
+        android.util.Log.d("FloatWindow", "Toast: $message")
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
