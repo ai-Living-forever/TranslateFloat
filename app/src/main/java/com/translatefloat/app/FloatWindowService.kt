@@ -1,7 +1,5 @@
 package com.translatefloat.app
 
-import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -22,6 +20,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -34,9 +33,8 @@ class FloatWindowService : Service() {
 
     private var floatBallView: View? = null
     private var translationPanelView: View? = null
-    private var backgroundView: View? = null
+    private var popupWindow: PopupWindow? = null
     private var floatBallParams: WindowManager.LayoutParams? = null
-    private var panelParams: WindowManager.LayoutParams? = null
 
     private var startX = 0f
     private var startY = 0f
@@ -51,11 +49,7 @@ class FloatWindowService : Service() {
         private const val CHANNEL_ID = "translate_float_channel"
         private const val NOTIFICATION_ID = 1
         var isRunning = false
-        
-        // 存储剪贴板内容的静态变量（主界面和悬浮窗共享）
         var lastClipboardText: String = ""
-        
-        // 存储用户选中的文字（通过 AccessibilityService）
         var lastSelectedText: String = ""
     }
 
@@ -72,11 +66,7 @@ class FloatWindowService : Service() {
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
         isRunning = true
-        
-        Handler(Looper.getMainLooper()).postDelayed({
-            showFloatBall()
-        }, 500)
-        
+        Handler(Looper.getMainLooper()).postDelayed({ showFloatBall() }, 500)
         return START_STICKY
     }
 
@@ -99,14 +89,9 @@ class FloatWindowService : Service() {
     }
 
     private fun createNotification(): Notification {
-        // 点击通知会打开应用
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, 
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }, 
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        val pendingIntent = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("TranslateFloat")
@@ -185,26 +170,20 @@ class FloatWindowService : Service() {
     }
 
     private fun onFloatBallClick() {
-        // 优先使用用户选中的文字（通过 AccessibilityService）
         var textToTranslate: String? = null
         
-        // 方法1: 使用用户选中的文字
         if (lastSelectedText.isNotBlank()) {
             textToTranslate = lastSelectedText
-            lastSelectedText = "" // 使用后清除
+            lastSelectedText = ""
         }
         
-        // 方法2: 尝试读取剪贴板
         if (textToTranslate.isNullOrBlank()) {
             try {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 textToTranslate = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-            } catch (e: Exception) {
-                // 忽略
-            }
+            } catch (e: Exception) { }
         }
         
-        // 方法3: 使用主界面保存的最后剪贴板内容
         if (textToTranslate.isNullOrBlank() && lastClipboardText.isNotBlank()) {
             textToTranslate = lastClipboardText
         }
@@ -218,7 +197,6 @@ class FloatWindowService : Service() {
         isPanelLoading = true
         showTranslationPanel()
         
-        // 执行翻译
         Thread {
             try {
                 val translated = translateApi.translate(textToTranslate, settingsManager.targetLang)
@@ -240,38 +218,14 @@ class FloatWindowService : Service() {
     }
 
     private fun showTranslationPanel() {
-        if (translationPanelView != null) return
-
-        // 创建半透明背景，点击可关闭
-        val bgParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            getWindowType(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSPARENT
-        )
+        if (popupWindow?.isShowing == true) return
         
-        backgroundView = View(this).apply {
-            setOnClickListener {
-                hideTranslationPanel()
-            }
-        }
-        
-        try {
-            windowManager.addView(backgroundView, bgParams)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
             setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
         }
 
-        // 标题
         val titleBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         titleBar.addView(TextView(this).apply {
             text = "翻译结果"
@@ -287,7 +241,6 @@ class FloatWindowService : Service() {
         })
         panel.addView(titleBar)
 
-        // 原文
         panel.addView(TextView(this).apply {
             text = "原文"
             textSize = 12f
@@ -301,7 +254,6 @@ class FloatWindowService : Service() {
             maxLines = 3
         })
 
-        // 译文
         panel.addView(TextView(this).apply {
             text = "译文"
             textSize = 12f
@@ -317,7 +269,6 @@ class FloatWindowService : Service() {
         }
         panel.addView(transTextView)
 
-        // 保存按钮
         panel.addView(Button(this).apply {
             text = "保存到 Obsidian"
             setBackgroundColor(0xFF10B981.toInt())
@@ -334,38 +285,28 @@ class FloatWindowService : Service() {
             }
         })
 
-        panelParams = WindowManager.LayoutParams(
-            dpToPx(320), WindowManager.LayoutParams.WRAP_CONTENT,
-            getWindowType(), 
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.CENTER }
-
-        translationPanelView = panel
-        try {
-            windowManager.addView(translationPanelView, panelParams)
-        } catch (e: Exception) {
-            e.printStackTrace()
+        popupWindow = PopupWindow(panel, dpToPx(320), WindowManager.LayoutParams.WRAP_CONTENT, true).apply {
+            setOutsideTouchable(true)
+            setBackgroundDrawable(null)
+            floatBallView?.let { floatBall ->
+                val location = IntArray(2)
+                floatBall.getLocationOnScreen(location)
+                showAtLocation(floatBall, Gravity.NO_GRAVITY, location[0], location[1] + dpToPx(60))
+            }
         }
+        
+        translationPanelView = panel
     }
 
     private fun updateTranslationPanel() {
-        translationPanelView?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) { }
-            translationPanelView = null
-        }
+        hideTranslationPanel()
         showTranslationPanel()
     }
 
     private fun hideTranslationPanel() {
-        backgroundView?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) { }
-            backgroundView = null
-        }
-        translationPanelView?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) { }
-            translationPanelView = null
-        }
+        popupWindow?.dismiss()
+        popupWindow = null
+        translationPanelView = null
         currentOriginalText = ""
         currentTranslatedText = ""
     }
