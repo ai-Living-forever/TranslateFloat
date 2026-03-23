@@ -2,30 +2,23 @@
 
 > 选中文字 → 翻译 → 保存到 Obsidian（按日期分类）
 
-一个轻量级的 PWA 翻译应用，让你在手机上轻松翻译并保存到 Obsidian 笔记。
+一个 Android 原生翻译悬浮窗应用，让你在手机上轻松翻译并保存到 Obsidian 笔记。
 
 ## ✨ 功能特性
 
-- 📋 **一键翻译** - 输入或粘贴文字，点击按钮即可翻译
+- 🎈 **悬浮球翻译** - 点击屏幕边缘的悬浮球，自动读取剪贴板或选中的文字
 - 🌐 **多语言支持** - 支持中文、英文、日语、韩语、法语、德语等
 - 📁 **按日期保存** - 同一天的翻译自动保存到同一个 Markdown 文件
-- 📱 **PWA 应用** - 可添加到手机主屏幕，像原生 App 一样使用
-- 💾 **本地存储** - 设置和历史记录保存在浏览器本地
-
-## 🚀 快速开始
-
-1. 打开应用
-2. 设置你的 Obsidian Vault 名称
-3. 输入要翻译的文字
-4. 点击「翻译」按钮
-5. 查看翻译结果，点击保存
+- 📱 **无障碍服务** - 自动检测用户选中的文字
+- 💾 **本地存储** - 设置和翻译历史保存在本地
 
 ## 📱 使用方法
 
-1. **首次使用**：在设置中填写你的 Obsidian Vault 名称
-2. **翻译**：在翻译框中输入文字 → 点击「翻译」按钮 → 查看结果
-3. **保存**：点击「保存」自动创建/追加笔记
-4. **PWA**：浏览器点击「添加到主屏幕」
+1. **安装 APK** - 下载并安装 TranslateFloat
+2. **首次设置** - 打开应用，填写 Obsidian Vault 名称
+3. **授权权限** - 授权悬浮窗权限和无障碍服务
+4. **翻译** - 复制文字 → 点击悬浮球 → 查看翻译结果
+5. **保存** - 点击保存按钮，自动追加到 Obsidian 对应日期的文件
 
 ## 📂 Obsidian 保存格式
 
@@ -48,10 +41,32 @@ Hello world
 
 ## 🛠 技术栈
 
-- HTML5 + CSS3 + Vanilla JavaScript
-- MyMemory Translation API（免费）
-- PWA (Web Manifest)
-- Obsidian URL Scheme
+- **语言**: Kotlin
+- **UI**: Jetpack Compose
+- **翻译 API**: Google Translate (免费)
+- **通信**: OkHttp3 + Gson
+- **保存**: Obsidian URL Scheme
+
+## 📦 构建
+
+### 环境要求
+
+- Android Studio Hedgehog (2023.1.1) 或更高
+- JDK 17
+- Android SDK 34
+- Gradle 8.2
+
+### 构建步骤
+
+1. 克隆仓库
+2. 用 Android Studio 打开项目
+3. Sync Gradle
+4. Build → Build APK
+
+### APK 下载
+
+直接下载已构建的 APK：
+- [TranslateFloat.apk](http://app-andriod-play.oss-cn-guangzhou.aliyuncs.com/TranslateFloat.apk)
 
 ## 📄 许可证
 
