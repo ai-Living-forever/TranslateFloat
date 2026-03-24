@@ -1,6 +1,6 @@
 package com.translatefloat.app
 
-import android.accessibilityservice.AccessibilityService
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,6 +10,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -26,35 +27,43 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 
 class FloatWindowService : Service() {
+
     private lateinit var windowManager: WindowManager
     private lateinit var settingsManager: SettingsManager
     private lateinit var translateApi: TranslateApi
     private lateinit var obsidianHelper: ObsidianHelper
 
+    // 悬浮球
     private var floatBallView: View? = null
-    private var translationPanelView: View? = null
-    private var backgroundView: View? = null
     private var floatBallParams: WindowManager.LayoutParams? = null
+    
+    // 翻译面板
+    private var panelContainer: View? = null  // 外层容器（透明背景）
     private var panelParams: WindowManager.LayoutParams? = null
-    private var bgParams: WindowManager.LayoutParams? = null
 
-    private var startX = 0f
-    private var startY = 0f
-    private var initialX = 0
-    private var initialY = 0
+    // 拖动状态
+    private var touchStartX = 0f
+    private var touchStartY = 0f
+    private var ballInitX = 0
+    private var ballInitY = 0
+    private var isDragging = false
 
+    // 翻译状态
     private var currentOriginalText = ""
     private var currentTranslatedText = ""
-    private var isPanelLoading = false
+    private var isPanelShowing = false
+    private var isTranslating = false
 
     companion object {
         private const val CHANNEL_ID = "translate_float_channel"
         private const val NOTIFICATION_ID = 1
+        private const val BALL_SIZE_DP = 56
+        private const val EDGE_MARGIN_DP = 12
+
         var isRunning = false
-        var lastClipboardText: String = ""
         var lastSelectedText: String = ""
-        // 新增：保存最后一次成功翻译的原文
-        var lastTranslatedText: String = ""
+        var lastClipboardText: String = ""
+        var lastTranslatedText: String = ""  // 保存上次翻译的原文
     }
 
     override fun onCreate() {
@@ -67,10 +76,9 @@ class FloatWindowService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = createNotification()
-        startForeground(NOTIFICATION_ID, notification)
+        startForeground(NOTIFICATION_ID, buildNotification())
         isRunning = true
-        Handler(Looper.getMainLooper()).postDelayed({ showFloatBall() }, 500)
+        Handler(Looper.getMainLooper()).postDelayed({ showFloatBall() }, 300)
         return START_STICKY
     }
 
@@ -79,331 +87,450 @@ class FloatWindowService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
-        removeFloatWindow()
+        removeAllViews()
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 通知
+    // ═══════════════════════════════════════════════════════════════════════
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "悬浮窗翻译", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "悬浮窗翻译服务运行中"
-                setShowBadge(false)
-            }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            val ch = NotificationChannel(CHANNEL_ID, "悬浮窗翻译", NotificationManager.IMPORTANCE_LOW)
+            ch.setShowBadge(false)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }
 
-    private fun createNotification(): Notification {
-        val pendingIntent = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        
+    private fun buildNotification(): Notification {
+        val pi = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("TranslateFloat")
-            .setContentText("悬浮窗已启动")
+            .setContentText("悬浮翻译运行中")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(pi)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 悬浮球
+    // ═══════════════════════════════════════════════════════════════════════
+
     private fun showFloatBall() {
         if (floatBallView != null) return
 
-        val container = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(dpToPx(56), dpToPx(56))
-            setBackgroundColor(0xFF6366F1.toInt())
+        val ballPx = dp(BALL_SIZE_DP)
+        val screenW = resources.displayMetrics.widthPixels
+        val screenH = resources.displayMetrics.heightPixels
+
+        // 圆形紫色背景
+        val circleBg = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0xFF6366F1.toInt())
         }
 
-        container.addView(TextView(this).apply {
+        // 白色"译"字
+        val label = TextView(this).apply {
             text = "译"
             textSize = 20f
             setTextColor(0xFFFFFFFF.toInt())
             gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        })
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        val ball = FrameLayout(this).apply {
+            background = circleBg
+            addView(label)
+            elevation = 8f
+        }
 
         floatBallParams = WindowManager.LayoutParams(
-            dpToPx(56), dpToPx(56), getWindowType(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            ballPx, ballPx,
+            windowType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = resources.displayMetrics.widthPixels - dpToPx(72)
-            y = resources.displayMetrics.heightPixels / 2 - dpToPx(28)
+            x = screenW - ballPx - dp(EDGE_MARGIN_DP)
+            y = screenH / 3
         }
 
-        container.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    startX = event.rawX; startY = event.rawY
-                    initialX = floatBallParams?.x ?: 0; initialY = floatBallParams?.y ?: 0
-                    true
+        ball.setOnTouchListener { _, ev -> handleBallTouch(ev) }
+
+        floatBallView = ball
+        try { windowManager.addView(ball, floatBallParams) } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun handleBallTouch(ev: MotionEvent): Boolean {
+        // 如果面板正在显示，忽略悬浮球点击
+        if (isPanelShowing) return false
+
+        when (ev.action) {
+            MotionEvent.ACTION_DOWN -> {
+                touchStartX = ev.rawX
+                touchStartY = ev.rawY
+                ballInitX = floatBallParams?.x ?: 0
+                ballInitY = floatBallParams?.y ?: 0
+                isDragging = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.rawX - touchStartX
+                val dy = ev.rawY - touchStartY
+                if (!isDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+                    isDragging = true
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    val deltaX = (event.rawX - startX).toInt()
-                    val deltaY = (event.rawY - startY).toInt()
-                    if (Math.abs(deltaX) > 15 || Math.abs(deltaY) > 15) {
-                        floatBallParams?.x = initialX + deltaX
-                        floatBallParams?.y = initialY + deltaY
-                        floatBallView?.let { windowManager.updateViewLayout(it, floatBallParams) }
-                    }
-                    true
+                if (isDragging) {
+                    floatBallParams?.x = (ballInitX + dx).toInt()
+                    floatBallParams?.y = (ballInitY + dy).toInt()
+                    floatBallView?.let { windowManager.updateViewLayout(it, floatBallParams) }
                 }
-                MotionEvent.ACTION_UP -> {
-                    if (Math.abs(event.rawX - startX) < 15 && Math.abs(event.rawY - startY) < 15) {
-                        onFloatBallClick()
-                    }
-                    true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (isDragging) {
+                    snapToEdge()
+                } else {
+                    onBallClick()
                 }
-                else -> true
             }
         }
+        return true
+    }
 
-        floatBallView = container
-        try {
-            windowManager.addView(floatBallView, floatBallParams)
-        } catch (e: Exception) {
-            e.printStackTrace()
+    /** 松手后吸附到左/右边缘 */
+    private fun snapToEdge() {
+        val params = floatBallParams ?: return
+        val ballPx = dp(BALL_SIZE_DP)
+        val screenW = resources.displayMetrics.widthPixels
+        val margin = dp(EDGE_MARGIN_DP)
+
+        val targetX = if (params.x + ballPx / 2 < screenW / 2) {
+            margin
+        } else {
+            screenW - ballPx - margin
+        }
+
+        ValueAnimator.ofInt(params.x, targetX).apply {
+            duration = 200
+            addUpdateListener {
+                params.x = it.animatedValue as Int
+                floatBallView?.let { v -> windowManager.updateViewLayout(v, params) }
+            }
+            start()
         }
     }
 
-    private fun getWindowType(): Int {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-    }
+    // ═══════════════════════════════════════════════════════════════════════
+    // 点击悬浮球 -> 开始翻译
+    // ═══════════════════════════════════════════════════════════════════════
 
-    private fun onFloatBallClick() {
-        var textToTranslate: String? = null
+    private fun onBallClick() {
+        if (isPanelShowing || isTranslating) return
+
+        // 获取要翻译的文字
+        val text = getTranslatableText()
         
-        // 1. 优先使用用户选中的文字
-        if (lastSelectedText.isNotBlank()) {
-            textToTranslate = lastSelectedText
-            android.util.Log.d("FloatWindow", "使用选中的文字: $textToTranslate")
-        }
-        
-        // 2. 尝试读取剪贴板
-        if (textToTranslate.isNullOrBlank()) {
-            try {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                textToTranslate = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-                android.util.Log.d("FloatWindow", "剪贴板内容: $textToTranslate")
-            } catch (e: Exception) {
-                android.util.Log.e("FloatWindow", "剪贴板读取失败: ${e.message}")
-            }
-        }
-        
-        // 3. 使用主界面保存的内容
-        if (textToTranslate.isNullOrBlank() && lastClipboardText.isNotBlank()) {
-            textToTranslate = lastClipboardText
-            android.util.Log.d("FloatWindow", "使用备用内容: $textToTranslate")
-        }
-        
-        // 4. 使用最后一次翻译的原文
-        if (textToTranslate.isNullOrBlank() && lastTranslatedText.isNotBlank()) {
-            textToTranslate = lastTranslatedText
-            android.util.Log.d("FloatWindow", "使用上次翻译的原文: $textToTranslate")
-        }
-        
-        if (textToTranslate.isNullOrBlank()) {
-            showToast("请先复制或选中要翻译的文字")
+        if (text.isNullOrBlank()) {
+            toast("请先复制要翻译的文字")
             return
         }
-        
-        currentOriginalText = textToTranslate
-        isPanelLoading = true
-        showTranslationPanel()
-        
+
+        // 保存原文
+        currentOriginalText = text
+        currentTranslatedText = ""
+        isTranslating = true
+
+        // 显示面板
+        showPanel()
+
         // 执行翻译
         Thread {
             try {
-                android.util.Log.d("FloatWindow", "开始翻译: $textToTranslate")
-                val translated = translateApi.translate(textToTranslate, settingsManager.targetLang)
-                android.util.Log.d("FloatWindow", "翻译结果: $translated")
-                currentTranslatedText = translated
-                settingsManager.addToHistory(textToTranslate, translated)
-                
-                // 保存翻译原文供下次使用
-                lastTranslatedText = textToTranslate
-                // 清除选中文字
-                lastSelectedText = ""
+                val result = translateApi.translate(text, settingsManager.targetLang)
+                currentTranslatedText = result
+                settingsManager.addToHistory(text, result)
                 
                 Handler(Looper.getMainLooper()).post {
-                    isPanelLoading = false
+                    isTranslating = false
                     updatePanelContent()
-                    showToast("翻译完成")
                 }
             } catch (e: Exception) {
-                android.util.Log.e("FloatWindow", "翻译失败: ${e.message}")
                 Handler(Looper.getMainLooper()).post {
                     currentTranslatedText = "翻译失败: ${e.message}"
-                    isPanelLoading = false
+                    isTranslating = false
                     updatePanelContent()
                 }
             }
         }.start()
     }
 
-    private fun showTranslationPanel() {
-        // 如果已有面板，先移除
-        if (translationPanelView != null) {
-            hideTranslationPanel()
+    private fun getTranslatableText(): String? {
+        // 1. 优先使用选中的文字
+        if (lastSelectedText.isNotBlank()) {
+            val text = lastSelectedText
+            lastSelectedText = "" // 用完清空
+            return text
         }
         
-        // 创建半透明背景层
-        bgParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            getWindowType(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        )
+        // 2. 读取剪贴板
+        try {
+            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clipText = cb.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
+            if (!clipText.isNullOrBlank()) {
+                return clipText
+            }
+        } catch (e: Exception) { }
         
-        backgroundView = View(this).apply {
-            setBackgroundColor(0x00000000)
+        // 3. 使用备用内容
+        if (lastClipboardText.isNotBlank()) {
+            return lastClipboardText
+        }
+        
+        return null
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 翻译面板
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private fun showPanel() {
+        if (panelContainer != null) return
+        
+        isPanelShowing = true
+
+        // 外层容器：全屏透明背景，点击关闭面板
+        val container = FrameLayout(this).apply {
+            setBackgroundColor(0x80000000.toInt()) // 半透明黑色背景
+            isClickable = true
+            isFocusable = true
             setOnClickListener {
-                hideTranslationPanel()
+                dismissPanel()
             }
         }
-        
-        try {
-            windowManager.addView(backgroundView, bgParams)
-        } catch (e: Exception) {
-            android.util.Log.e("FloatWindow", "添加背景失败: ${e.message}")
-        }
 
-        val panel = createPanelView()
+        // 内部卡片
+        val card = buildPanelCard()
+
+        // 卡片居中
+        val cardParams = FrameLayout.LayoutParams(
+            dp(320),
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+        container.addView(card, cardParams)
 
         panelParams = WindowManager.LayoutParams(
-            dpToPx(320), WindowManager.LayoutParams.WRAP_CONTENT,
-            getWindowType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            windowType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.CENTER }
+        ).apply {
+            gravity = Gravity.CENTER
+        }
 
-        translationPanelView = panel
+        panelContainer = container
         try {
-            windowManager.addView(translationPanelView, panelParams)
+            windowManager.addView(container, panelParams)
         } catch (e: Exception) {
-            android.util.Log.e("FloatWindow", "添加面板失败: ${e.message}")
+            e.printStackTrace()
         }
     }
-    
-    private fun createPanelView(): View {
-        val panel = LinearLayout(this).apply {
+
+    private fun buildPanelCard(): View {
+        val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFFFFFFFF.toInt())
-            setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            // 白色圆角背景
+            background = GradientDrawable().apply {
+                setColor(0xFFFFFFFF.toInt())
+                cornerRadius = dp(16).toFloat()
+            }
+            elevation = 16f
+            // 阻止点击穿透
+            isClickable = true
+            isFocusable = true
         }
 
-        // 标题
-        val titleBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        titleBar.addView(TextView(this).apply {
+        // 标题栏
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(12))
+        }
+        
+        titleRow.addView(TextView(this).apply {
             text = "翻译结果"
-            textSize = 16f
+            textSize = 18f
             setTextColor(0xFF111827.toInt())
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })
-        titleBar.addView(TextView(this).apply {
+        
+        // 关闭按钮 X
+        titleRow.addView(TextView(this).apply {
             text = "✕"
-            textSize = 16f
+            textSize = 22f
             setTextColor(0xFF9CA3AF.toInt())
-            setOnClickListener { hideTranslationPanel() }
+            setPadding(dp(8), 0, 0, 0)
+            setOnClickListener { dismissPanel() }
         })
-        panel.addView(titleBar)
+        
+        card.addView(titleRow)
 
-        // 原文
-        panel.addView(TextView(this).apply {
+        // 分割线
+        card.addView(View(this).apply {
+            setBackgroundColor(0xFFE5E7EB.toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 1
+            ).apply { bottomMargin = dp(12) }
+        })
+
+        // 原文标签
+        card.addView(TextView(this).apply {
             text = "原文"
             textSize = 12f
             setTextColor(0xFF6B7280.toInt())
-            setPadding(0, dpToPx(12), 0, dpToPx(4))
+            setPadding(0, 0, 0, dp(4))
         })
-        
-        val originalTextView = TextView(this).apply {
-            text = currentOriginalText
-            textSize = 14f
-            setTextColor(0xFF374151.toInt())
-            maxLines = 3
-        }
-        panel.addView(originalTextView)
 
-        // 译文
-        panel.addView(TextView(this).apply {
+        // 原文内容 - 确保显示
+        val originalTv = TextView(this).apply {
+            text = currentOriginalText.ifEmpty { "（无内容）" }
+            textSize = 15f
+            setTextColor(0xFF374151.toInt())
+            maxLines = 5
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = GradientDrawable().apply {
+                setColor(0xFFF3F4F6.toInt())
+                cornerRadius = dp(8).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        card.addView(originalTv)
+
+        // 间距
+        card.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(1, dp(16))
+        })
+
+        // 译文标签
+        card.addView(TextView(this).apply {
             text = "译文"
             textSize = 12f
             setTextColor(0xFF6B7280.toInt())
-            setPadding(0, dpToPx(12), 0, dpToPx(4))
+            setPadding(0, 0, 0, dp(4))
         })
-        
-        val translatedTextView = TextView(this).apply {
-            text = if (isPanelLoading) "翻译中..." else currentTranslatedText
-            textSize = 14f
-            setTextColor(0xFF000000.toInt())
-            maxLines = 5
+
+        // 译文内容
+        val translatedTv = TextView(this).apply {
+            text = if (isTranslating) "翻译中..." else currentTranslatedText.ifEmpty { "" }
+            textSize = 16f
+            setTextColor(0xFF111827.toInt())
+            maxLines = 8
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = GradientDrawable().apply {
+                setColor(0xFFEEF2FF.toInt())
+                cornerRadius = dp(8).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         }
-        panel.addView(translatedTextView)
+        card.addView(translatedTv)
 
         // 保存按钮
-        panel.addView(Button(this).apply {
-            text = "保存到 Obsidian"
-            setBackgroundColor(0xFF10B981.toInt())
+        card.addView(Button(this).apply {
+            text = "💾 保存到 Obsidian"
             setTextColor(0xFFFFFFFF.toInt())
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(44)).apply { topMargin = dpToPx(16) }
+            isAllCaps = false
+            textSize = 16f
+            background = GradientDrawable().apply {
+                setColor(0xFF10B981.toInt())
+                cornerRadius = dp(10).toFloat()
+            }
+            setPadding(0, dp(12), 0, dp(12))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(50)
+            ).apply { topMargin = dp(20) }
             setOnClickListener {
                 try {
                     obsidianHelper.saveToObsidian(currentOriginalText, currentTranslatedText)
-                    showToast("已保存到 Obsidian")
-                    hideTranslationPanel()
+                    toast("已保存到 Obsidian")
+                    dismissPanel()
                 } catch (e: Exception) {
-                    showToast("保存失败: ${e.message}")
+                    toast("保存失败: ${e.message}")
                 }
             }
         })
-        
-        return panel
-    }
-    
-    private fun updatePanelContent() {
-        // 移除旧面板，创建新面板
-        translationPanelView?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) { }
-        }
-        
-        translationPanelView = createPanelView()
-        
-        try {
-            windowManager.addView(translationPanelView, panelParams)
-        } catch (e: Exception) {
-            android.util.Log.e("FloatWindow", "更新面板失败: ${e.message}")
-        }
+
+        return card
     }
 
-    private fun hideTranslationPanel() {
-        backgroundView?.let {
+    private fun updatePanelContent() {
+        if (panelContainer == null) return
+        
+        // 移除旧卡片，添加新卡片
+        val container = panelContainer as? FrameLayout ?: return
+        container.removeAllViews()
+        
+        val card = buildPanelCard()
+        val cardParams = FrameLayout.LayoutParams(
+            dp(320),
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply { gravity = Gravity.CENTER }
+        container.addView(card, cardParams)
+    }
+
+    private fun dismissPanel() {
+        panelContainer?.let {
             try { windowManager.removeView(it) } catch (e: Exception) { }
-            backgroundView = null
         }
-        translationPanelView?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) { }
-            translationPanelView = null
-        }
+        panelContainer = null
+        panelParams = null
         currentOriginalText = ""
         currentTranslatedText = ""
+        isPanelShowing = false
+        isTranslating = false
     }
 
-    private fun removeFloatWindow() {
-        hideTranslationPanel()
+    // ═══════════════════════════════════════════════════════════════════════
+    // 工具方法
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private fun windowType() =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    private fun toast(msg: String) =
+        Handler(Looper.getMainLooper()).post {
+            try { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() } catch (_: Exception) { }
+        }
+
+    private fun removeAllViews() {
+        dismissPanel()
         floatBallView?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) { }
+            try { windowManager.removeView(it) } catch (_: Exception) { }
             floatBallView = null
         }
     }
-
-    private fun showToast(message: String) {
-        Handler(Looper.getMainLooper()).post {
-            try { Toast.makeText(this, message, Toast.LENGTH_SHORT).show() } catch (e: Exception) { }
-        }
-    }
-
-    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 }

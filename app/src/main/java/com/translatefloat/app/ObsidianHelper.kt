@@ -8,6 +8,10 @@ import java.net.URLEncoder
 class ObsidianHelper(private val context: Context) {
     private val settingsManager = SettingsManager(context)
 
+    /**
+     * 保存到 Obsidian
+     * 使用 Uri.encode 进行 URL 编码，避免 + 号问题
+     */
     fun saveToObsidian(original: String, translated: String) {
         val vault = settingsManager.vaultName
         if (vault.isBlank()) {
@@ -28,9 +32,10 @@ class ObsidianHelper(private val context: Context) {
             append("---\n\n")
         }
 
-        val encodedVault = URLEncoder.encode(vault, "UTF-8")
-        val encodedFile = URLEncoder.encode(filePath, "UTF-8")
-        val encodedContent = URLEncoder.encode(content, "UTF-8")
+        // 使用 Uri.encode 而不是 URLEncoder.encode，避免空格变成 +
+        val encodedVault = Uri.encode(vault)
+        val encodedFile = Uri.encode(filePath)
+        val encodedContent = Uri.encode(content)
 
         val url = "obsidian://new?vault=$encodedVault&file=$encodedFile&content=$encodedContent&append=true"
 
@@ -60,9 +65,10 @@ class ObsidianHelper(private val context: Context) {
             append("---\n\n")
         }
 
-        val encodedVault = URLEncoder.encode(vault, "UTF-8")
-        val encodedFile = URLEncoder.encode(filePath, "UTF-8")
-        val encodedContent = URLEncoder.encode(content, "UTF-8")
+        // 使用 Uri.encode 而不是 URLEncoder.encode
+        val encodedVault = Uri.encode(vault)
+        val encodedFile = Uri.encode(filePath)
+        val encodedContent = Uri.encode(content)
 
         val url = "obsidian://new?vault=$encodedVault&file=$encodedFile&content=$encodedContent&append=true"
 
